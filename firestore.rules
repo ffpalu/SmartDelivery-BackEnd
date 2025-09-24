@@ -1,0 +1,89 @@
+// firestore.rules
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check if user is admin
+    function isAdmin() {
+      return request.auth != null && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    
+    // Helper function to check if user is courier
+    function isCourier() {
+      return request.auth != null && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'courier';
+    }
+    
+    // Helper function to check if user is customer  
+    function isCustomer() {
+      return request.auth != null && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'customer';
+    }
+    
+    // Users collection
+    match /users/{userId} {
+      // Users can read/write their own profile
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      
+      // Admins can read all users
+      allow read: if isAdmin();
+      
+      // Admins can update user status
+      allow write: if isAdmin();
+    }
+    
+    // Orders collection
+    match /orders/{orderId} {
+      // Customer can read/write their own orders
+      allow read, write: if request.auth != null && (
+        resource.data.customerId == request.auth.uid
+      );
+      
+      // Courier can read orders assigned to them
+      allow read, write: if request.auth != null && (
+        resource.data.courierId == request.auth.uid
+      );
+      
+      // Admin can read/write all orders
+      allow read, write: if isAdmin();
+      
+      // Customer can create new orders (only for themselves)
+      allow create: if request.auth != null && 
+        request.resource.data.customerId == request.auth.uid;
+      
+      // Couriers can accept pending orders (set themselves as courier)
+      allow update: if request.auth != null && 
+        isCourier() &&
+        resource.data.status == 'pending' &&
+        request.resource.data.courierId == request.auth.uid;
+    }
+    
+    // Deliveries collection
+    match /deliveries/{deliveryId} {
+      // Courier can read/write their deliveries
+      allow read, write: if request.auth != null && (
+        resource.data.courierId == request.auth.uid
+      );
+      
+      // Customer can read deliveries of their orders
+      allow read: if request.auth != null && (
+        exists(/databases/$(database)/documents/orders/$(resource.data.orderId)) &&
+        get(/databases/$(database)/documents/orders/$(resource.data.orderId)).data.customerId == request.auth.uid
+      );
+      
+      // Admin can read/write all deliveries
+      allow read, write: if isAdmin();
+    }
+    
+    // Logs collection (admin only)
+    match /logs/{logId} {
+      allow read, write: if isAdmin();
+    }
+    
+    // Test documents (for development)
+    match /_test/{document=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}
